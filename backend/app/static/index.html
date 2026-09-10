@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UK Software Engineering Job Finder | Visa Sponsorship Intelligence</title>
+  <meta name="description" content="Production-grade UK Software Engineering Job Finder aggregating verified jobs with Skilled Worker Visa Sponsorship and Home Office Licence Validation." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🇬🇧</text></svg>">
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+  <div class="app-container">
+    <!-- Navigation Bar -->
+    <header class="navbar">
+      <div class="navbar-inner">
+        <div class="nav-brand" id="nav-brand-btn">
+          <span>🇬🇧</span>
+          <span>SE JobFinder</span>
+          <span class="brand-badge">UK VISA FOCUS</span>
+        </div>
+
+        <nav class="nav-links">
+          <a class="nav-link active" data-route="dashboard" id="nav-link-dashboard">
+            <span>📊</span>
+            <span>Dashboard</span>
+          </a>
+          <a class="nav-link" data-route="jobs" id="nav-link-jobs">
+            <span>💼</span>
+            <span>Jobs</span>
+          </a>
+          <a class="nav-link" data-route="companies" id="nav-link-companies">
+            <span>🏛️</span>
+            <span>Companies</span>
+          </a>
+          <a class="nav-link" data-route="admin" id="nav-link-admin">
+            <span>⚙️</span>
+            <span>Admin</span>
+          </a>
+        </nav>
+
+        <div class="nav-actions">
+          <button class="btn-refresh" id="global-refresh-btn" title="Trigger direct ATS refresh cycle">
+            <span class="refresh-icon">🔄</span>
+            <span>Refresh Jobs</span>
+          </button>
+          <div id="nav-auth-slot"></div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Views -->
+      <section id="dashboard-view" class="view-section"></section>
+      <section id="jobs-view" class="view-section hidden"></section>
+      <section id="companies-view" class="view-section hidden"></section>
+      <section id="admin-view" class="view-section hidden"></section>
+    </main>
+
+    <!-- Job Details Modal Root -->
+    <div id="job-modal-root" class="hidden"></div>
+
+    <!-- Admin Login Modal Root -->
+    <div id="auth-modal-root" class="hidden"></div>
+
+    <!-- Toast Notifications Root -->
+    <div id="toast-container" class="toast-container"></div>
+
+  </div>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

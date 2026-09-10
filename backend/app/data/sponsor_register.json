@@ -1,0 +1,278 @@
+[
+  {
+    "name": "Monzo Bank Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Deliveroo UK Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Starling Bank Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Revolut Ltd",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Snyk Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Checkout Ltd",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Thought Machine Group Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Spotify UK Ltd",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "GoCardless Ltd",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Skyscanner Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "Edinburgh"
+  },
+  {
+    "name": "Squareup Europe Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Visa Europe Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Cisco International Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "Feltham"
+  },
+  {
+    "name": "Bupa Care Services",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Publicis Groupe UK Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Deel UK Ltd",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Postman UK Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Linear Technology Ltd",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Pleo Technologies UK Ltd",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Kroo Bank Ltd",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Atlan UK Ltd",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Kraken Technologies Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Synthesia Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Motorway Online Ltd",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Marshmallow Financial Services Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Depop Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Cleo AI Ltd",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Microsoft Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "Reading"
+  },
+  {
+    "name": "Google UK Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Amazon UK Services Ltd",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Meta Platforms Ireland Limited (UK Branch)",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Apple Europe Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Bloomberg LP",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Goldman Sachs International",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "JPMorgan Chase Bank, N.A.",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Barclays Services Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "NatWest Group Plc",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "Edinburgh"
+  },
+  {
+    "name": "HSBC Global Services (UK) Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Lloyds Bank Plc",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  },
+  {
+    "name": "Sage (UK) Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "Newcastle"
+  },
+  {
+    "name": "Softcat PLC",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "Marlow"
+  },
+  {
+    "name": "Auto Trader Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "Manchester"
+  },
+  {
+    "name": "The Hut Group Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "Manchester"
+  },
+  {
+    "name": "Booking.com Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "Manchester"
+  },
+  {
+    "name": "ARM Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "Cambridge"
+  },
+  {
+    "name": "Wise Payments Limited",
+    "route": "Skilled Worker",
+    "rating": "A rating",
+    "town": "London"
+  }
+]
