@@ -44,6 +44,8 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+from backend.app.utils.rate_limiter import RateLimitMiddleware
+
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
@@ -52,6 +54,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Configure Rate Limiting Middleware
+app.add_middleware(RateLimitMiddleware)
 
 # Mount API routers
 app.include_router(auth_router, prefix=settings.API_V1_STR)

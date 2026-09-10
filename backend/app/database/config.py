@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     ENABLE_SCHEDULER: bool = True
 
 
+    # Rate Limiting
+    ENABLE_RATE_LIMITING: bool = True
+    RATE_LIMIT_GLOBAL_PER_MINUTE: int = 120
+    RATE_LIMIT_AUTH_PER_MINUTE: int = 10
+    RATE_LIMIT_ADMIN_PER_MINUTE: int = 20
+    RATE_LIMIT_LOOKUP_PER_MINUTE: int = 30
+
     # Security
     SECRET_KEY: str = "supersecretkey_change_in_production_uk_se_jobs_2026"
     ALGORITHM: str = "HS256"

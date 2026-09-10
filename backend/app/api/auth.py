@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from backend.app.database.config import settings
 from backend.app.database.session import get_db
 from backend.app.models.user import User
+from backend.app.utils.rate_limiter import rate_limit
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -50,7 +51,11 @@ class UserInfoResponse(BaseModel):
     username: Optional[str] = None
     role: Optional[str] = None
 
-@router.post("/login", response_model=LoginResponse)
+@router.post(
+    "/login",
+    response_model=LoginResponse,
+    dependencies=[Depends(rate_limit(max_requests=settings.RATE_LIMIT_AUTH_PER_MINUTE, window_seconds=60, bucket_name="auth_login"))]
+)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
     username = payload.username.strip()
     password = payload.password.strip()

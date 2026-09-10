@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
+from backend.app.database.config import settings
 from backend.app.database.session import get_db
 from backend.app.models.job import Job
 from backend.app.models.company import Company
@@ -13,10 +14,15 @@ from backend.app.services.verification_service import VerificationService
 from backend.app.services.sponsor_register_service import sponsor_register
 from backend.app.schemas.admin import RefreshResponse, SponsorshipOverrideRequest
 from backend.app.schemas.source import JobSourceUpdate
+from backend.app.utils.rate_limiter import rate_limit
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
-@router.post("/refresh", response_model=RefreshResponse)
+@router.post(
+    "/refresh",
+    response_model=RefreshResponse,
+    dependencies=[Depends(rate_limit(max_requests=settings.RATE_LIMIT_ADMIN_PER_MINUTE, window_seconds=60, bucket_name="admin_refresh"))]
+)
 async def trigger_job_refresh(source_id: Optional[int] = None, db: Session = Depends(get_db)):
     """
     Manually triggers job collection and verification.
@@ -139,7 +145,10 @@ def close_single_job(job_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Job marked as CLOSED", "job_id": job_id}
 
-@router.post("/sponsor-register/update")
+@router.post(
+    "/sponsor-register/update",
+    dependencies=[Depends(rate_limit(max_requests=settings.RATE_LIMIT_ADMIN_PER_MINUTE, window_seconds=60, bucket_name="admin_sponsor_update"))]
+)
 async def update_sponsor_register():
     """
     Updates the sponsor register from the official UK Home Office release.

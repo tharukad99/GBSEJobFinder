@@ -143,7 +143,7 @@ const state = {
     sponsorship: 'confirmed_may_offer',
     location: '',
     skill: '',
-    experience_level: '',
+    experience_level: 'mid',
     applied_status: 'all',
     days: null,
     work_type: '',
@@ -282,7 +282,7 @@ function parseUrlAndNavigate() {
     state.jobs.sponsorship = searchParams.get('sponsorship') || 'confirmed_may_offer';
     state.jobs.location = searchParams.get('location') || '';
     state.jobs.skill = searchParams.get('skill') || '';
-    state.jobs.experience_level = searchParams.get('experience_level') || '';
+    state.jobs.experience_level = searchParams.get('experience_level') || 'mid';
     state.jobs.applied_status = searchParams.get('applied_status') || 'all';
     state.jobs.days = searchParams.get('days') ? Number(searchParams.get('days')) : null;
     state.jobs.work_type = searchParams.get('work_type') || '';
@@ -951,20 +951,20 @@ function renderFilterPanel() {
         <span>Seniority / Experience</span>
       </div>
       <label class="filter-option">
-        <input type="radio" name="filter-exp" value="all" ${!state.jobs.experience_level || state.jobs.experience_level === 'all' ? 'checked' : ''} />
-        <span>All Experience Levels</span>
+        <input type="radio" name="filter-exp" value="mid" ${state.jobs.experience_level === 'mid' || !state.jobs.experience_level ? 'checked' : ''} />
+        <span style="color: #0369a1; font-weight: 700;">🔹 Mid Level Developer</span>
       </label>
       <label class="filter-option">
         <input type="radio" name="filter-exp" value="senior" ${state.jobs.experience_level === 'senior' ? 'checked' : ''} />
         <span style="color: #86198f; font-weight: 700;">⭐ Senior / Lead / Principal</span>
       </label>
       <label class="filter-option">
-        <input type="radio" name="filter-exp" value="mid" ${state.jobs.experience_level === 'mid' ? 'checked' : ''} />
-        <span>🔹 Mid Level Developer</span>
-      </label>
-      <label class="filter-option">
         <input type="radio" name="filter-exp" value="junior" ${state.jobs.experience_level === 'junior' ? 'checked' : ''} />
         <span>🌱 Junior / Graduate</span>
+      </label>
+      <label class="filter-option">
+        <input type="radio" name="filter-exp" value="all" ${state.jobs.experience_level === 'all' ? 'checked' : ''} />
+        <span>All Experience Levels</span>
       </label>
     </div>
 
@@ -1078,7 +1078,7 @@ function renderFilterPanel() {
     state.jobs.sponsorship = 'confirmed_may_offer';
     state.jobs.location = '';
     state.jobs.skill = '';
-    state.jobs.experience_level = '';
+    state.jobs.experience_level = 'mid';
     state.jobs.applied_status = 'all';
     state.jobs.days = null;
     state.jobs.work_type = '';
