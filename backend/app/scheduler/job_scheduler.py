@@ -6,6 +6,7 @@ from backend.app.database.config import settings
 from backend.app.database.session import SessionLocal
 from backend.app.services.job_service import JobService
 from backend.app.services.verification_service import VerificationService
+from backend.app.services.source_discovery_service import SourceDiscoveryService
 from backend.app.models.job import Job
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,23 @@ async def scheduled_job_refresh():
     finally:
         db.close()
 
+async def scheduled_source_discovery():
+    """Periodic job to auto-discover and register new UK Software Engineering job sources."""
+    logger.info("Starting scheduled UK job source auto-discovery...")
+    db = SessionLocal()
+    try:
+        res = await SourceDiscoveryService.run_discovery_cycle(db, use_ai=True)
+        logger.info(f"Completed source discovery: {res.get('new_sources_added', 0)} new sources registered.")
+        
+        # If new sources were added, trigger a refresh to immediately ingest their jobs
+        if res.get('new_sources_added', 0) > 0:
+            logger.info("Triggering refresh for newly added sources...")
+            await JobService.refresh_all_sources(db)
+    except Exception as e:
+        logger.error(f"Error during scheduled source discovery: {e}", exc_info=True)
+    finally:
+        db.close()
+
 def start_scheduler():
     if not settings.ENABLE_SCHEDULER:
         logger.info("Scheduler is disabled by configuration.")
@@ -54,6 +72,19 @@ def start_scheduler():
             replace_existing=True,
             next_run_time=datetime.now() + timedelta(seconds=10) # Run initial ingestion shortly after startup
         )
+
+        if settings.ENABLE_AUTO_SOURCE_DISCOVERY:
+            discovery_hours = settings.SOURCE_DISCOVERY_INTERVAL_HOURS or 6
+            scheduler.add_job(
+                scheduled_source_discovery,
+                trigger=IntervalTrigger(hours=discovery_hours),
+                id="source_discovery_task",
+                name="Automated UK Tech Job Source Auto-Discovery",
+                replace_existing=True,
+                next_run_time=datetime.now() + timedelta(seconds=30) # Initial discovery shortly after launch
+            )
+            logger.info(f"Auto-Discovery Task scheduled (recurring every {discovery_hours} hours).")
+
         scheduler.start()
         logger.info(f"Background Job Scheduler started (interval: recurring every {minutes_interval} minutes).")
 

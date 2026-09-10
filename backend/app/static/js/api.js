@@ -136,7 +136,11 @@ export const api = {
     return await request(`/sponsorship/lookup?${query.toString()}`);
   },
 
-  // Admin & Sources
+  // Admin, Sources & Monitoring
+  async getMonitorStatus() {
+    return await request('/sources/monitor');
+  },
+
   async getSources() {
     return await request('/sources');
   },
@@ -174,5 +178,16 @@ export const api = {
 
   async updateSponsorRegister() {
     return await request('/admin/sponsor-register/update', { method: 'POST' });
+  },
+
+  async autoDiscoverSources() {
+    return await request('/sources/auto-discover', { method: 'POST' });
+  },
+
+  async addCompanySource(payload) {
+    return await request('/sources/add-company', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 };

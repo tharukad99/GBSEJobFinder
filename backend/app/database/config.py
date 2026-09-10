@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     JOB_REFRESH_HOURS: Optional[int] = None
     ENABLE_SCHEDULER: bool = True
 
+    # Auto Job Source Discovery & AI Configuration
+    ENABLE_AUTO_SOURCE_DISCOVERY: bool = True
+    SOURCE_DISCOVERY_INTERVAL_HOURS: int = 6
+    GEMINI_API_KEY: Optional[str] = None
+    OPENAI_API_KEY: Optional[str] = None
 
     # Rate Limiting
     ENABLE_RATE_LIMITING: bool = True

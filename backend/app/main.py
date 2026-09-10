@@ -91,6 +91,10 @@ if STATIC_DIR.exists():
     @app.get("/admin")
     async def serve_admin():
         return FileResponse(STATIC_DIR / "index.html")
+
+    @app.get("/monitor")
+    async def serve_monitor():
+        return FileResponse(STATIC_DIR / "index.html")
 else:
     @app.get("/")
     def root():

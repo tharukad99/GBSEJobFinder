@@ -162,9 +162,17 @@ const state = {
   admin: {
     sources: [],
     runs: [],
+    subTab: 'monitor',
     loading: false,
     actionLoading: false,
     statusMessage: null,
+  },
+  monitor: {
+    data: null,
+    loading: false,
+    autoRefresh: true,
+    timerId: null,
+    filterSource: 'all',
   },
   selectedJob: null,
   modalVerifyResult: null,
@@ -273,7 +281,14 @@ function parseUrlAndNavigate() {
   let route = 'dashboard';
   if (path.startsWith('/jobs')) route = 'jobs';
   else if (path.startsWith('/companies')) route = 'companies';
-  else if (path.startsWith('/admin')) route = 'admin';
+  else if (path.startsWith('/monitor')) {
+    route = 'admin';
+    state.admin.subTab = 'monitor';
+  } else if (path.startsWith('/admin')) {
+    route = 'admin';
+    const requestedTab = searchParams.get('tab');
+    if (requestedTab) state.admin.subTab = requestedTab;
+  }
 
   state.currentRoute = route;
 
@@ -290,6 +305,9 @@ function parseUrlAndNavigate() {
     state.jobs.page = searchParams.get('page') ? Number(searchParams.get('page')) : 1;
   } else if (route === 'companies') {
     state.companies.q = searchParams.get('q') || '';
+  } else if (route === 'admin') {
+    const requestedTab = searchParams.get('tab');
+    if (requestedTab) state.admin.subTab = requestedTab;
   }
 
   renderAuthNav();
@@ -477,11 +495,17 @@ function closeAuthModal() {
 
 // Render Controllers
 function renderCurrentRoute() {
-  const views = ['dashboard-view', 'jobs-view', 'companies-view', 'admin-view'];
+  const views = ['dashboard-view', 'jobs-view', 'companies-view', 'monitor-view', 'admin-view'];
   views.forEach((v) => {
     const el = document.getElementById(v);
     if (el) el.classList.add('hidden');
   });
+
+  // Stop monitor auto-refresh interval when navigating away
+  if (state.currentRoute !== 'monitor' && state.monitor.timerId) {
+    clearInterval(state.monitor.timerId);
+    state.monitor.timerId = null;
+  }
 
   const activeView = document.getElementById(`${state.currentRoute}-view`);
   if (activeView) activeView.classList.remove('hidden');
@@ -492,6 +516,8 @@ function renderCurrentRoute() {
     loadJobsData();
   } else if (state.currentRoute === 'companies') {
     loadCompaniesData();
+  } else if (state.currentRoute === 'monitor') {
+    loadMonitorData();
   } else if (state.currentRoute === 'admin') {
     loadAdminData();
   }
@@ -1673,17 +1699,19 @@ async function loadAdminData() {
   container.innerHTML = `
     <div style="text-align: center; padding: 60px 20px; color: #64748b;">
       <div class="spinning" style="display: inline-block; font-size: 28px; margin-bottom: 12px;">🔄</div>
-      <p style="font-weight: 600;">Loading ATS Feeds and Ingestion Logs...</p>
+      <p style="font-weight: 600;">Loading Admin Portal & Scheduler Telemetry...</p>
     </div>
   `;
 
   try {
-    const [sources, runs] = await Promise.all([
+    const [sources, runs, monitorData] = await Promise.all([
       api.getSources(),
-      api.getScrapeRuns(25),
+      api.getScrapeRuns(30),
+      api.getMonitorStatus().catch(() => null),
     ]);
     state.admin.sources = sources;
     state.admin.runs = runs;
+    state.admin.monitor = monitorData;
     renderAdminView();
   } catch (err) {
     if (err.message.includes('401') || err.message.includes('unauthorized')) {
@@ -1693,8 +1721,12 @@ async function loadAdminData() {
       container.innerHTML = `
         <div style="padding: 24px; background: #fff1f2; color: #9f1239; border-radius: 12px; border: 1px solid #fecdd3;">
           <strong>Error loading admin:</strong> ${escapeHtml(err.message)}
+          <div style="margin-top: 12px;">
+            <button id="admin-retry-btn" class="btn-primary">Retry</button>
+          </div>
         </div>
       `;
+      document.getElementById('admin-retry-btn')?.addEventListener('click', loadAdminData);
     }
   } finally {
     state.admin.loading = false;
@@ -1714,7 +1746,7 @@ function renderAdminLoginScreen() {
           </div>
           <h2 style="font-size: 1.4rem; font-weight: 800; color: #0f172a;">Administrator Access Required</h2>
           <p style="font-size: 0.875rem; color: #64748b; margin-top: 4px;">
-            Please log in with administrator credentials to manage ATS feeds, trigger manual scrape cycles, and sync UK Government records.
+            Please log in with administrator credentials to manage ATS feeds, trigger manual scrape cycles, and monitor background scheduler telemetry.
           </p>
         </div>
 
@@ -1798,58 +1830,242 @@ function renderAdminView() {
   const container = document.getElementById('admin-view');
   if (!container) return;
 
-  container.innerHTML = `
-    <div style="display: flex; flex-direction: column; gap: 28px;">
-      <!-- Header -->
-      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
-        <div>
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <h1 style="font-size: 1.75rem; font-weight: 800; color: #0f172a;">
-              System Administration & Ingestion Feeds
-            </h1>
-            <span style="background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 700;">
-              Admin Mode Active
-            </span>
+  const currentSubTab = state.admin.subTab || 'monitor';
+  const mon = state.admin.monitor || {};
+  const isRunning = mon.scheduler_running ?? true;
+  const isEnabled = mon.scheduler_enabled ?? true;
+  const totalRuns = mon.total_runs || state.admin.runs.length || 0;
+  const successRuns = mon.success_runs || state.admin.runs.filter(r => r.Status === 'SUCCESS').length || 0;
+  const failedRuns = mon.failed_runs || state.admin.runs.filter(r => r.Status === 'FAILED').length || 0;
+  const successRate = totalRuns > 0 ? Math.round((successRuns / totalRuns) * 100) : 100;
+  const totalAdded = (mon.total_jobs_added || 0).toLocaleString();
+  const totalUpdated = (mon.total_jobs_updated || 0).toLocaleString();
+  const totalDups = (mon.total_duplicates_prevented || 0).toLocaleString();
+  const nextRunFormatted = mon.next_run_time ? new Date(mon.next_run_time).toLocaleTimeString('en-GB') : 'Active (Every 5 mins)';
+  const lastRunFormatted = mon.last_run_time ? formatRelativeTime(mon.last_run_time) : 'Recently';
+
+  let subTabContentHtml = '';
+
+  if (currentSubTab === 'monitor') {
+    subTabContentHtml = `
+      <!-- Live Scheduler Telemetry & KPIs Section -->
+      <div style="display: flex; flex-direction: column; gap: 20px;">
+        <!-- Top Engine Banner -->
+        <div style="background: white; border: 1px solid #e2e8f0; border-radius: 14px; padding: 20px; box-shadow: var(--shadow-sm); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="pulse-dot ${isRunning ? 'active' : 'inactive'}"></span>
+              <h2 style="font-size: 1.15rem; font-weight: 800; color: #0f172a; margin: 0;">
+                APScheduler Engine Status: ${isRunning ? '<span style="color: #059669;">ACTIVE & RUNNING</span>' : '<span style="color: #dc2626;">PAUSED</span>'}
+              </h2>
+            </div>
+            <p style="color: #64748b; font-size: 0.88rem; margin: 4px 0 0 0;">
+              Cadence: <strong>Every 5 minutes</strong> • Next Cycle: <strong style="color: #059669;">⏰ ${nextRunFormatted}</strong> • Last: <strong>${lastRunFormatted}</strong>
+            </p>
           </div>
-          <p style="color: #64748b; font-size: 0.95rem; margin-top: 4px;">
-            Manage automated refresh cycles (recurring every 5 minutes), configure ATS feeds, and sync UK Government sponsor register data.
-          </p>
+
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <button id="admin-subtab-trigger-btn" class="btn-primary" style="padding: 8px 16px; font-size: 0.85rem;">
+              <span>⚡ Run Ingestion Now</span>
+            </button>
+            <button id="admin-subtab-refresh-btn" class="btn-secondary" style="padding: 8px 14px; font-size: 0.85rem;">
+              <span>🔄 Refresh</span>
+            </button>
+          </div>
         </div>
 
-        <div style="display: flex; gap: 10px;">
-          <button 
-            id="admin-sync-sponsors-btn"
-            class="btn-secondary"
-            style="display: flex; align-items: center; gap: 6px;"
-          >
-            <span>🛡️</span>
-            <span>Sync GOV.UK Sponsors</span>
-          </button>
+        <!-- 4 KPI Cards -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px;">
+          <div class="stat-card" style="margin-bottom: 0;">
+            <div style="font-size: 1.5rem; width: 44px; height: 44px; border-radius: 10px; background: #eff6ff; display: flex; align-items: center; justify-content: center;">⏱️</div>
+            <div>
+              <div style="font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase;">Scraping Cycles</div>
+              <div style="font-size: 1.45rem; font-weight: 800; color: #0f172a; line-height: 1.2;">${totalRuns}</div>
+              <div style="font-size: 0.75rem; color: #059669; font-weight: 600;">${successRuns} success • ${failedRuns} fail</div>
+            </div>
+          </div>
 
-          <button 
-            id="admin-full-refresh-btn"
-            class="btn-primary"
-            style="display: flex; align-items: center; gap: 6px;"
-          >
-            <span>🔄</span>
-            <span>Run Full Refresh Now</span>
-          </button>
+          <div class="stat-card" style="margin-bottom: 0;">
+            <div style="font-size: 1.5rem; width: 44px; height: 44px; border-radius: 10px; background: #ecfdf5; display: flex; align-items: center; justify-content: center;">🎯</div>
+            <div>
+              <div style="font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase;">Engine Health</div>
+              <div style="font-size: 1.45rem; font-weight: 800; color: ${successRate >= 90 ? '#059669' : '#d97706'}; line-height: 1.2;">${successRate}%</div>
+              <div style="font-size: 0.75rem; color: #64748b;">Cycle reliability score</div>
+            </div>
+          </div>
+
+          <div class="stat-card" style="margin-bottom: 0;">
+            <div style="font-size: 1.5rem; width: 44px; height: 44px; border-radius: 10px; background: #f0f9ff; display: flex; align-items: center; justify-content: center;">💼</div>
+            <div>
+              <div style="font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase;">Jobs Ingested</div>
+              <div style="font-size: 1.45rem; font-weight: 800; color: #0284c7; line-height: 1.2;">${totalAdded} <span style="font-size: 0.8rem; font-weight: 600; color: #64748b;">new</span></div>
+              <div style="font-size: 0.75rem; color: #64748b;">${totalUpdated} updated</div>
+            </div>
+          </div>
+
+          <div class="stat-card" style="margin-bottom: 0;">
+            <div style="font-size: 1.5rem; width: 44px; height: 44px; border-radius: 10px; background: #fdf4ff; display: flex; align-items: center; justify-content: center;">🛡️</div>
+            <div>
+              <div style="font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase;">Duplicate Shield</div>
+              <div style="font-size: 1.45rem; font-weight: 800; color: #7c3aed; line-height: 1.2;">${totalDups}</div>
+              <div style="font-size: 0.75rem; color: #64748b;">Duplicates blocked</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Registered Sources Summary & Recent Runs Preview -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
+          <!-- Active Sources Quick Card -->
+          <div style="background: white; border: 1px solid #e2e8f0; border-radius: 14px; padding: 20px; box-shadow: var(--shadow-sm);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+              <h3 style="font-size: 1rem; font-weight: 700; color: #0f172a; margin: 0; display: flex; align-items: center; gap: 6px;">
+                <span>🌐</span> Active Ingestion Sources (${state.admin.sources.length})
+              </h3>
+              <button class="btn-secondary admin-switch-tab-btn" data-target-tab="sources" style="padding: 3px 8px; font-size: 0.75rem;">
+                Manage All →
+              </button>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+              ${state.admin.sources.map(s => `
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #f1f5f9;">
+                  <div>
+                    <span style="font-weight: 600; color: #1e293b; font-size: 0.85rem;">${escapeHtml(s.SourceName)}</span>
+                    <span style="font-size: 0.75rem; color: #64748b; margin-left: 6px;">(${s.TotalJobsCount || 0} jobs)</span>
+                  </div>
+                  <span class="badge-status ${s.IsEnabled ? 'status-success' : 'status-failed'}" style="font-size: 0.72rem;">
+                    ${s.IsEnabled ? 'ACTIVE' : 'DISABLED'}
+                  </span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- Quick Engine Specifications -->
+          <div style="background: white; border: 1px solid #e2e8f0; border-radius: 14px; padding: 20px; box-shadow: var(--shadow-sm);">
+            <h3 style="font-size: 1rem; font-weight: 700; color: #0f172a; margin-top: 0; margin-bottom: 14px; display: flex; align-items: center; gap: 6px;">
+              <span>⚙️</span> Engine Specifications
+            </h3>
+            <div style="display: flex; flex-direction: column; gap: 10px; font-size: 0.85rem;">
+              <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #f1f5f9; padding-bottom: 6px;">
+                <span style="color: #64748b;">Scheduler Type:</span>
+                <span style="font-weight: 600; color: #0f172a;">AsyncIO Background Scheduler</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #f1f5f9; padding-bottom: 6px;">
+                <span style="color: #64748b;">Execution Cadence:</span>
+                <span style="font-weight: 700; color: #0284c7;">Every 5 minutes</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #f1f5f9; padding-bottom: 6px;">
+                <span style="color: #64748b;">Duplicate Prevention:</span>
+                <span style="font-weight: 600; color: #059669;">SHA-256 Fingerprint Shield</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: #64748b;">Home Office Sync:</span>
+                <span style="font-weight: 600; color: #0f172a;">Daily Auto-Validation</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
+    `;
+  } else if (currentSubTab === 'sources') {
+    subTabContentHtml = `
+      <div style="display: flex; flex-direction: column; gap: 20px;">
+        <!-- AI Auto-Discovery & Ingestion Expansion Card -->
+        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: white; border-radius: 14px; padding: 22px 24px; box-shadow: var(--shadow-md);">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+            <div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 1.3rem;">🤖</span>
+                <h3 style="font-size: 1.15rem; font-weight: 800; margin: 0; color: white;">
+                  Automated UK Job Sources & AI Discovery Engine
+                </h3>
+                <span style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 9999px;">
+                  AUTONOMOUS SCHEDULER ACTIVE
+                </span>
+              </div>
+              <p style="color: #94a3b8; font-size: 0.88rem; margin: 6px 0 0 0; max-width: 680px; line-height: 1.4;">
+                Automatically scans the internet (via AI + live ATS endpoint probes) for UK tech companies and scaleups hiring software engineers, registers their public feeds, and triggers background ingestion.
+              </p>
+            </div>
 
-      <div id="admin-status-message-box"></div>
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <button id="admin-trigger-discovery-btn" class="btn-primary" style="background: #2563eb; color: white; padding: 9px 16px; font-size: 0.88rem; font-weight: 700; border-radius: 8px; display: inline-flex; align-items: center; gap: 6px;">
+                <span>✨</span>
+                <span>Auto-Discover New Sources Now</span>
+              </button>
 
-      <!-- ATS Feeds Grid -->
-      <div>
-        <h2 style="font-size: 1.2rem; font-weight: 800; color: #0f172a; margin-bottom: 14px; display: flex; align-items: center; gap: 8px;">
-          <span>🗄️</span>
-          <span>Configured Job Providers & ATS Feeds</span>
-        </h2>
+              <button id="admin-toggle-add-form-btn" class="btn-secondary" style="background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); padding: 9px 14px; font-size: 0.88rem; font-weight: 600; border-radius: 8px;">
+                <span>➕ Add Custom Feed</span>
+              </button>
+            </div>
+          </div>
 
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px;">
+          <!-- Collapsible Manual Add Custom Company Form -->
+          <div id="admin-add-custom-source-panel" style="display: none; margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,0.15);">
+            <form id="admin-add-source-form" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)) auto; gap: 12px; align-items: flex-end;">
+              <div>
+                <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #cbd5e1; margin-bottom: 4px;">ATS Provider</label>
+                <select id="custom-source-provider" style="width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid #475569; background: #1e293b; color: white; font-size: 0.85rem;">
+                  <option value="greenhouse">Greenhouse (boards-api.greenhouse.io)</option>
+                  <option value="lever">Lever (api.lever.co)</option>
+                  <option value="ashby">Ashby (api.ashbyhq.com)</option>
+                  <option value="workable">Workable (apply.workable.com)</option>
+                  <option value="smartrecruiters">SmartRecruiters (api.smartrecruiters.com)</option>
+                </select>
+              </div>
+
+              <div>
+                <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #cbd5e1; margin-bottom: 4px;">Company Slug / Board ID</label>
+                <input type="text" id="custom-source-slug" placeholder="e.g. monzo, deliveroo, revolut" required style="width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid #475569; background: #1e293b; color: white; font-size: 0.85rem;" />
+              </div>
+
+              <div>
+                <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #cbd5e1; margin-bottom: 4px;">Company Name (Optional)</label>
+                <input type="text" id="custom-source-name" placeholder="e.g. Monzo Bank" style="width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid #475569; background: #1e293b; color: white; font-size: 0.85rem;" />
+              </div>
+
+              <button type="submit" id="custom-source-submit-btn" class="btn-primary" style="padding: 9px 18px; font-size: 0.85rem; height: 38px; justify-content: center;">
+                <span>Register & Ingest</span>
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <!-- Header -->
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 6px; flex-wrap: wrap; gap: 12px;">
+          <div>
+            <h2 style="font-size: 1.2rem; font-weight: 800; color: #0f172a; margin: 0; display: flex; align-items: center; gap: 8px;">
+              <span>🗄️</span>
+              <span>Configured Job Providers & ATS Feeds (${state.admin.sources.length})</span>
+            </h2>
+            <p style="color: #64748b; font-size: 0.85rem; margin: 4px 0 0 0;">
+              Enable or disable ATS scrapers, trigger test feed runs, and monitor stored vacancies.
+            </p>
+          </div>
+
+          <button id="admin-full-refresh-btn" class="btn-primary" style="display: flex; align-items: center; gap: 6px;">
+            <span>⚡</span>
+            <span>Run All Feeds Now</span>
+          </button>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
           ${state.admin.sources
             .map(
-              (src) => `
+              (src) => {
+                let companyCount = 0;
+                if (src.ConfigJson) {
+                  try {
+                    const cfg = json.parse(src.ConfigJson);
+                    companyCount = (cfg.companies || []).length;
+                  } catch (e) {
+                    try {
+                      const cfg = JSON.parse(src.ConfigJson);
+                      companyCount = (cfg.companies || []).length;
+                    } catch(err) {}
+                  }
+                }
+                return `
             <div style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; justify-content: space-between; gap: 12px;">
               <div>
                 <div style="display: flex; align-items: center; justify-content: space-between;">
@@ -1867,7 +2083,7 @@ function renderAdminView() {
                   </button>
                 </div>
                 <div style="font-size: 0.8rem; color: #64748b; margin-top: 4px;">
-                  Type: <code>${escapeHtml(src.SourceType)}</code>
+                  Type: <code>${escapeHtml(src.SourceType)}</code> ${companyCount > 0 ? `• <strong>${companyCount} employers tracked</strong>` : ''}
                 </div>
               </div>
 
@@ -1885,20 +2101,25 @@ function renderAdminView() {
                 </button>
               </div>
             </div>
-          `
+          `;
+              }
             )
             .join('')}
         </div>
       </div>
-
-      <!-- Execution Logs Table -->
+    `;
+  } else if (currentSubTab === 'history') {
+    subTabContentHtml = `
       <div style="background: white; border: 1px solid #e2e8f0; border-radius: 14px; padding: 20px; box-shadow: var(--shadow-sm);">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
-          <h2 style="font-size: 1.2rem; font-weight: 800; color: #0f172a; display: flex; align-items: center; gap: 8px;">
-            <span>📊</span>
-            <span>Recent Ingestion & Scrape Runs</span>
-          </h2>
-          <button id="admin-refresh-logs-btn" class="btn-secondary" style="padding: 4px 10px; font-size: 0.8rem;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <h2 style="font-size: 1.2rem; font-weight: 800; color: #0f172a; margin: 0; display: flex; align-items: center; gap: 8px;">
+              <span>📋</span>
+              <span>Recent Ingestion & Scrape Runs</span>
+            </h2>
+            <p style="color: #64748b; font-size: 0.82rem; margin: 2px 0 0 0;">Execution log across all ATS parsers and automated background cycles (last 30 runs)</p>
+          </div>
+          <button id="admin-refresh-logs-btn" class="btn-secondary" style="padding: 6px 12px; font-size: 0.82rem;">
             <span>🔄 Refresh Logs</span>
           </button>
         </div>
@@ -1906,57 +2127,250 @@ function renderAdminView() {
         <div style="overflow-x: auto;">
           <table style="width: 100%; border-collapse: collapse; font-size: 0.875rem;">
             <thead>
-              <tr style="border-bottom: 2px solid #e2e8f0; text-align: left; color: #475569; font-weight: 700;">
+              <tr style="border-bottom: 2px solid #e2e8f0; text-align: left; color: #475569; font-weight: 700; background: #f8fafc;">
+                <th style="padding: 10px 12px;">Run ID</th>
                 <th style="padding: 10px 12px;">Source</th>
                 <th style="padding: 10px 12px;">Started At</th>
+                <th style="padding: 10px 12px;">Duration</th>
                 <th style="padding: 10px 12px;">Found</th>
                 <th style="padding: 10px 12px;">Added</th>
                 <th style="padding: 10px 12px;">Updated</th>
                 <th style="padding: 10px 12px;">Duplicates</th>
-                <th style="padding: 10px 12px;">Rejected</th>
                 <th style="padding: 10px 12px;">Status</th>
               </tr>
             </thead>
             <tbody>
               ${state.admin.runs
                 .map(
-                  (r) => `
+                  (r) => {
+                    const dur = r.CompletedAt && r.StartedAt ? `${Math.round((new Date(r.CompletedAt) - new Date(r.StartedAt))/100)/10}s` : (r.DurationSeconds ? `${r.DurationSeconds}s` : '-');
+                    return `
                 <tr style="border-bottom: 1px solid #f1f5f9;">
-                  <td style="padding: 10px 12px; font-weight: 600;">${escapeHtml(r.SourceName)}</td>
+                  <td style="padding: 10px 12px; font-weight: 600; color: #64748b;">#${r.ScrapeRunId || '-'}</td>
+                  <td style="padding: 10px 12px; font-weight: 600;">${escapeHtml(r.SourceName || 'All Feeds')}</td>
                   <td style="padding: 10px 12px; color: #64748b;">
                     ${r.StartedAt ? new Date(r.StartedAt).toLocaleString('en-GB') : 'N/A'}
                   </td>
+                  <td style="padding: 10px 12px; font-family: monospace; color: #334155;">${dur}</td>
                   <td style="padding: 10px 12px;">${r.JobsFound || 0}</td>
                   <td style="padding: 10px 12px; color: #047857; font-weight: 700;">+${r.JobsAdded || 0}</td>
                   <td style="padding: 10px 12px; color: #2563eb;">${r.JobsUpdated || 0}</td>
-                  <td style="padding: 10px 12px; color: #64748b;">${r.DuplicatesFound || 0}</td>
-                  <td style="padding: 10px 12px; color: #94a3b8;">${r.JobsRejected || 0}</td>
+                  <td style="padding: 10px 12px; color: #7c3aed;">${r.DuplicatesFound || 0}</td>
                   <td style="padding: 10px 12px;">
                     ${
                       r.Status === 'SUCCESS'
-                        ? `<span style="background: #ecfdf5; color: #047857; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 0.75rem;">SUCCESS</span>`
+                        ? `<span style="background: #ecfdf5; color: #047857; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 0.75rem;">✓ SUCCESS</span>`
                         : r.Status === 'RUNNING'
-                        ? `<span style="background: #eff6ff; color: #1d4ed8; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 0.75rem;">RUNNING</span>`
-                        : `<span style="background: #fff1f2; color: #be123c; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 0.75rem;" title="${escapeHtml(r.ErrorMessage || '')}">FAILED</span>`
+                        ? `<span style="background: #eff6ff; color: #1d4ed8; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 0.75rem;">🔄 RUNNING</span>`
+                        : `<span style="background: #fff1f2; color: #be123c; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 0.75rem;" title="${escapeHtml(r.ErrorMessage || '')}">✕ FAILED</span>`
                     }
                   </td>
                 </tr>
-              `
+              `;
+                  }
                 )
-                .join('')}
+                .join('') || `
+                  <tr>
+                    <td colspan="9" style="text-align: center; padding: 24px; color: #94a3b8;">
+                      No scrape runs recorded yet.
+                    </td>
+                  </tr>
+                `}
             </tbody>
           </table>
         </div>
       </div>
+    `;
+  } else if (currentSubTab === 'sponsors') {
+    subTabContentHtml = `
+      <div style="background: white; border: 1px solid #e2e8f0; border-radius: 14px; padding: 24px; box-shadow: var(--shadow-sm); max-width: 800px;">
+        <div style="display: flex; align-items: flex-start; gap: 16px;">
+          <div style="font-size: 2.2rem;">🛡️</div>
+          <div>
+            <h2 style="font-size: 1.25rem; font-weight: 800; color: #0f172a; margin: 0 0 6px 0;">UK Home Office Licensed Sponsor Register</h2>
+            <p style="color: #64748b; font-size: 0.9rem; margin: 0 0 16px 0; line-height: 1.5;">
+              Synchronize the official UK Government CSV Register of licensed Skilled Worker sponsors. This database powers automatic validation when job adverts do not explicitly specify visa sponsorship.
+            </p>
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; margin-bottom: 20px; font-size: 0.85rem; color: #475569;">
+              <div><strong>Status:</strong> Connected to official GOV.UK CSV feed</div>
+              <div style="margin-top: 4px;"><strong>Target Schema:</strong> <code>job.Companies</code> & <code>job.SponsorshipEvidence</code></div>
+            </div>
+            <button id="admin-sync-sponsors-btn" class="btn-primary" style="padding: 10px 18px; font-size: 0.9rem;">
+              <span>🛡️ Synchronize GOV.UK Sponsor Register Now</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = `
+    <div style="display: flex; flex-direction: column; gap: 20px;">
+      <!-- Header -->
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px;">
+        <div>
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <h1 style="font-size: 1.75rem; font-weight: 800; color: #0f172a; margin: 0;">
+              ⚙️ Admin Administration & Control Center
+            </h1>
+            <span class="pulse-dot ${isRunning ? 'active' : 'inactive'}" title="${isRunning ? 'Scheduler is Active & Running' : 'Scheduler is Stopped'}"></span>
+            <span style="background: ${isRunning ? '#ecfdf5' : '#fef2f2'}; color: ${isRunning ? '#047857' : '#dc2626'}; border: 1px solid ${isRunning ? '#a7f3d0' : '#fecaca'}; padding: 3px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 700;">
+              ${isRunning ? 'SCHEDULER RUNNING' : 'SCHEDULER PAUSED'}
+            </span>
+          </div>
+          <p style="color: #64748b; font-size: 0.92rem; margin-top: 4px; margin-bottom: 0;">
+            Manage background scrapers, configure ATS feeds, inspect execution history, and sync UK Home Office sponsor records.
+          </p>
+        </div>
+      </div>
+
+      <!-- Admin Sub-Menu Navigation -->
+      <div class="admin-subnav" id="admin-subnav-container">
+        <button class="admin-subnav-btn ${currentSubTab === 'monitor' ? 'active' : ''}" data-subtab="monitor">
+          <span>📡</span>
+          <span>Scheduler Monitor</span>
+        </button>
+        <button class="admin-subnav-btn ${currentSubTab === 'sources' ? 'active' : ''}" data-subtab="sources">
+          <span>🗄️</span>
+          <span>Configured Job Providers & ATS Feeds</span>
+          <span class="admin-subnav-badge">${state.admin.sources.length}</span>
+        </button>
+        <button class="admin-subnav-btn ${currentSubTab === 'history' ? 'active' : ''}" data-subtab="history">
+          <span>📋</span>
+          <span>Execution History Logs</span>
+          <span class="admin-subnav-badge">${state.admin.runs.length}</span>
+        </button>
+        <button class="admin-subnav-btn ${currentSubTab === 'sponsors' ? 'active' : ''}" data-subtab="sponsors">
+          <span>🛡️</span>
+          <span>GOV.UK Sponsor Sync</span>
+        </button>
+      </div>
+
+      <div id="admin-status-message-box"></div>
+
+      <!-- Dynamic Sub-Tab Content -->
+      <div id="admin-subtab-content">
+        ${subTabContentHtml}
+      </div>
     </div>
   `;
 
+  // Subnav click handlers
+  container.querySelectorAll('.admin-subnav-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const tab = e.currentTarget.getAttribute('data-subtab');
+      state.admin.subTab = tab;
+      window.history.replaceState({}, '', `/admin?tab=${tab}`);
+      renderAdminView();
+    });
+  });
+
+  // Switch tab buttons inside content
+  container.querySelectorAll('.admin-switch-tab-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const targetTab = e.currentTarget.getAttribute('data-target-tab');
+      state.admin.subTab = targetTab;
+      window.history.replaceState({}, '', `/admin?tab=${targetTab}`);
+      renderAdminView();
+    });
+  });
+
+  // Specific Action Handlers based on active view
+  document.getElementById('admin-subtab-trigger-btn')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.innerText = '⚡ Triggering...';
+    showToast('Triggering background job refresh...', 'info');
+
+    try {
+      await api.triggerJobRefresh();
+      showToast('Scheduled scraper sync triggered successfully!', 'success');
+      setTimeout(() => loadAdminData(), 1500);
+    } catch (err) {
+      showToast('Failed to trigger scraper: ' + err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerText = '⚡ Run Ingestion Now';
+    }
+  });
+
+  document.getElementById('admin-subtab-refresh-btn')?.addEventListener('click', () => {
+    loadAdminData();
+    showToast('Telemetry refreshed', 'info');
+  });
+
   document.getElementById('admin-refresh-logs-btn')?.addEventListener('click', loadAdminData);
+
+  // AI Auto-Discovery & Custom Source Handlers
+  document.getElementById('admin-trigger-discovery-btn')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.innerHTML = '<span>⏳</span><span>Scanning & Probing ATS Feeds...</span>';
+    showToast('Running AI & probe discovery across UK tech employers...', 'info');
+
+    try {
+      const res = await api.autoDiscoverSources();
+      const added = res.new_sources_added || 0;
+      const already = res.already_tracked || 0;
+      if (added > 0) {
+        showToast(`🎉 Success! Auto-discovered & registered ${added} new UK tech company feeds! Ingestion triggered.`, 'success');
+      } else {
+        showToast(`Discovery scan finished: All ${already} discovered UK sources are already tracked and active.`, 'info');
+      }
+      loadAdminData();
+    } catch (err) {
+      showToast('Auto-discovery error: ' + err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<span>✨</span><span>Auto-Discover New Sources Now</span>';
+    }
+  });
+
+  document.getElementById('admin-toggle-add-form-btn')?.addEventListener('click', () => {
+    const panel = document.getElementById('admin-add-custom-source-panel');
+    if (panel) {
+      const isVisible = panel.style.display !== 'none';
+      panel.style.display = isVisible ? 'none' : 'block';
+    }
+  });
+
+  document.getElementById('admin-add-source-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const provider = document.getElementById('custom-source-provider').value;
+    const slug = document.getElementById('custom-source-slug').value.trim();
+    const name = document.getElementById('custom-source-name').value.trim();
+    const submitBtn = document.getElementById('custom-source-submit-btn');
+
+    if (!slug) return;
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerText = 'Registering...';
+    }
+
+    try {
+      const res = await api.addCompanySource({
+        provider,
+        company_slug: slug,
+        company_name: name || null
+      });
+      showToast(res.message || `Registered ${slug} under ${provider}!`, 'success');
+      document.getElementById('custom-source-slug').value = '';
+      document.getElementById('custom-source-name').value = '';
+      loadAdminData();
+    } catch (err) {
+      showToast('Registration failed: ' + err.message, 'error');
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerText = 'Register & Ingest';
+      }
+    }
+  });
 
   document.getElementById('admin-full-refresh-btn')?.addEventListener('click', async () => {
     const btn = document.getElementById('admin-full-refresh-btn');
     if (btn) btn.disabled = true;
-    showToast('Triggering full ingestion cycle...', 'info');
+    showToast('Triggering full ingestion cycle across all active feeds...', 'info');
 
     try {
       await api.triggerJobRefresh(null);
@@ -2017,6 +2431,320 @@ function renderAdminView() {
         targetBtn.disabled = false;
       }
     });
+  });
+}
+
+// ==========================================
+// 4.5 SCHEDULER MONITOR CONTROLLER
+async function loadMonitorData(isSilent = false) {
+  const container = document.getElementById('monitor-view');
+  if (!container) return;
+
+  if (!isSilent && !state.monitor.data) {
+    state.monitor.loading = true;
+    container.innerHTML = `
+      <div style="text-align: center; padding: 60px 20px; color: #64748b;">
+        <div class="spinning" style="display: inline-block; font-size: 28px; margin-bottom: 12px;">📡</div>
+        <p style="font-weight: 600;">Connecting to APScheduler Engine & Telemetry...</p>
+      </div>
+    `;
+  }
+
+  try {
+    const data = await api.getMonitorStatus();
+    state.monitor.data = data;
+    renderMonitorView();
+  } catch (err) {
+    if (!isSilent) {
+      container.innerHTML = `
+        <div style="padding: 24px; background: #fff1f2; color: #9f1239; border-radius: 12px; border: 1px solid #fecdd3;">
+          <strong>Error loading Scheduler Telemetry:</strong> ${escapeHtml(err.message)}
+          <div style="margin-top: 12px;">
+            <button id="monitor-retry-btn" class="btn-primary">Retry</button>
+          </div>
+        </div>
+      `;
+      document.getElementById('monitor-retry-btn')?.addEventListener('click', () => loadMonitorData());
+    }
+  } finally {
+    state.monitor.loading = false;
+    setupMonitorAutoRefresh();
+  }
+}
+
+function setupMonitorAutoRefresh() {
+  if (state.currentRoute !== 'monitor') {
+    if (state.monitor.timerId) {
+      clearInterval(state.monitor.timerId);
+      state.monitor.timerId = null;
+    }
+    return;
+  }
+
+  if (state.monitor.autoRefresh && !state.monitor.timerId) {
+    state.monitor.timerId = setInterval(() => {
+      if (state.currentRoute === 'monitor') {
+        loadMonitorData(true);
+      }
+    }, 10000);
+  } else if (!state.monitor.autoRefresh && state.monitor.timerId) {
+    clearInterval(state.monitor.timerId);
+    state.monitor.timerId = null;
+  }
+}
+
+function renderMonitorView() {
+  const container = document.getElementById('monitor-view');
+  if (!container) return;
+
+  const data = state.monitor.data;
+  if (!data) return;
+
+  const isRunning = data.scheduler_running;
+  const isEnabled = data.scheduler_enabled;
+  const totalRuns = data.total_runs || 0;
+  const successRuns = data.success_runs || 0;
+  const failedRuns = data.failed_runs || 0;
+  const successRate = totalRuns > 0 ? Math.round((successRuns / totalRuns) * 100) : 100;
+  const totalAdded = (data.total_jobs_added || 0).toLocaleString();
+  const totalUpdated = (data.total_jobs_updated || 0).toLocaleString();
+  const totalDups = (data.total_duplicates_prevented || 0).toLocaleString();
+
+  const nextRunFormatted = data.next_run_time ? new Date(data.next_run_time).toLocaleTimeString('en-GB') : 'Paused / Not scheduled';
+  const lastRunFormatted = data.last_run_time ? formatRelativeTime(data.last_run_time) : 'Never';
+
+  container.innerHTML = `
+    <!-- Monitor Header -->
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
+      <div>
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+          <h1 style="font-size: 1.75rem; font-weight: 800; color: #0f172a; margin: 0;">📡 Background Job Scheduler Monitor</h1>
+          <span class="pulse-dot ${isRunning ? 'active' : 'inactive'}" title="${isRunning ? 'Scheduler is Active & Running' : 'Scheduler is Inactive'}"></span>
+          <span style="font-size: 0.8rem; font-weight: 700; color: ${isRunning ? '#059669' : '#dc2626'}; background: ${isRunning ? '#ecfdf5' : '#fef2f2'}; padding: 3px 8px; border-radius: 9999px; border: 1px solid ${isRunning ? '#a7f3d0' : '#fecaca'};">
+            ${isRunning ? 'ACTIVE • RUNNING' : 'STOPPED'}
+          </span>
+        </div>
+        <p style="color: #64748b; font-size: 0.9rem; margin: 0;">
+          Real-time diagnostics, ATS feed scrapers telemetry, duplicate deduplication metrics & execution logs.
+        </p>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <!-- Auto refresh toggle -->
+        <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; font-weight: 600; color: #475569; background: #f8fafc; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 8px; cursor: pointer;">
+          <input type="checkbox" id="monitor-autorefresh-toggle" ${state.monitor.autoRefresh ? 'checked' : ''} style="cursor: pointer;">
+          <span>Auto-refresh (10s)</span>
+        </label>
+
+        <!-- Refresh Button -->
+        <button id="monitor-manual-refresh-btn" class="btn-secondary" style="padding: 7px 14px; font-size: 0.85rem;" title="Fetch latest status">
+          🔄 Refresh
+        </button>
+
+        <!-- Trigger Now Button -->
+        <button id="monitor-trigger-sync-btn" class="btn-primary" style="padding: 7px 16px; font-size: 0.85rem;" title="Run all active ATS parsers right now">
+          ⚡ Run Ingestion Now
+        </button>
+      </div>
+    </div>
+
+    <!-- Quick Stats Cards -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px;">
+      <!-- Total Runs -->
+      <div class="stat-card">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 0.82rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Scraping Cycles</span>
+          <span style="font-size: 1.25rem;">⏱️</span>
+        </div>
+        <div style="font-size: 1.8rem; font-weight: 800; color: #0f172a; margin-top: 6px;">${totalRuns}</div>
+        <div style="font-size: 0.8rem; color: #64748b; margin-top: 4px;">
+          <span style="color: #059669; font-weight: 600;">${successRuns} success</span> • <span style="color: ${failedRuns > 0 ? '#dc2626' : '#64748b'}; font-weight: 600;">${failedRuns} errors</span>
+        </div>
+      </div>
+
+      <!-- Success Rate -->
+      <div class="stat-card">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 0.82rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Execution Health</span>
+          <span style="font-size: 1.25rem;">🎯</span>
+        </div>
+        <div style="font-size: 1.8rem; font-weight: 800; color: ${successRate >= 90 ? '#059669' : '#d97706'}; margin-top: 6px;">${successRate}%</div>
+        <div style="font-size: 0.8rem; color: #64748b; margin-top: 4px;">
+          Cycle reliability score
+        </div>
+      </div>
+
+      <!-- Jobs Added & Updated -->
+      <div class="stat-card">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 0.82rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Ingested Vacancies</span>
+          <span style="font-size: 1.25rem;">💼</span>
+        </div>
+        <div style="font-size: 1.8rem; font-weight: 800; color: #0284c7; margin-top: 6px;">${totalAdded} <span style="font-size: 0.95rem; font-weight: 600; color: #64748b;">new</span></div>
+        <div style="font-size: 0.8rem; color: #64748b; margin-top: 4px;">
+          ${totalUpdated} refreshed updates
+        </div>
+      </div>
+
+      <!-- Duplicates Prevented -->
+      <div class="stat-card">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 0.82rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Duplicate Shield</span>
+          <span style="font-size: 1.25rem;">🛡️</span>
+        </div>
+        <div style="font-size: 1.8rem; font-weight: 800; color: #7c3aed; margin-top: 6px;">${totalDups}</div>
+        <div style="font-size: 0.8rem; color: #64748b; margin-top: 4px;">
+          Duplicate postings blocked
+        </div>
+      </div>
+    </div>
+
+    <!-- Engine Telemetry & Schedule Grid -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-bottom: 24px;">
+      <!-- Schedule Engine Details -->
+      <div class="monitor-card" style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+        <h3 style="font-size: 1rem; font-weight: 700; color: #0f172a; margin-top: 0; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
+          <span>⚙️</span> Scheduler Engine Specs
+        </h3>
+        <div style="display: flex; flex-direction: column; gap: 12px; font-size: 0.88rem;">
+          <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px;">
+            <span style="color: #64748b;">Engine Mode:</span>
+            <span style="font-weight: 600; color: #0f172a;">APScheduler Background (AsyncIO)</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px;">
+            <span style="color: #64748b;">Sync Cadence:</span>
+            <span style="font-weight: 700; color: #0284c7; background: #f0f9ff; padding: 2px 8px; border-radius: 6px;">Every ${data.interval_minutes} Minutes</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px;">
+            <span style="color: #64748b;">Next Scheduled Run:</span>
+            <span style="font-weight: 600; color: #059669;">⏰ ${nextRunFormatted}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px;">
+            <span style="color: #64748b;">Last Run Executed:</span>
+            <span style="font-weight: 600; color: #334155;">${lastRunFormatted}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #64748b;">Scheduler Configuration:</span>
+            <span style="font-weight: 600; color: ${isEnabled ? '#059669' : '#dc2626'};">${isEnabled ? 'ENABLE_SCHEDULER=true' : 'ENABLE_SCHEDULER=false'}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Configured Feed Sources Summary -->
+      <div class="monitor-card" style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+        <h3 style="font-size: 1rem; font-weight: 700; color: #0f172a; margin-top: 0; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
+          <span>🌐</span> Registered Job Sources & ATS Feeds (${data.sources ? data.sources.length : 0})
+        </h3>
+        <div style="display: flex; flex-direction: column; gap: 10px; max-height: 180px; overflow-y: auto; padding-right: 4px;">
+          ${(data.sources || []).map(s => `
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #f1f5f9;">
+              <div>
+                <div style="font-weight: 600; color: #1e293b; font-size: 0.88rem;">${escapeHtml(s.SourceName)}</div>
+                <div style="font-size: 0.75rem; color: #64748b;">${escapeHtml(s.SourceType || 'ATS Feed')} • ${s.TotalJobsCount} jobs stored</div>
+              </div>
+              <div>
+                <span class="badge-status ${s.IsEnabled ? 'status-success' : 'status-failed'}" style="font-size: 0.72rem; padding: 2px 8px;">
+                  ${s.IsEnabled ? 'ENABLED' : 'DISABLED'}
+                </span>
+              </div>
+            </div>
+          `).join('') || '<div style="color: #94a3b8; font-size: 0.85rem;">No active sources configured.</div>'}
+        </div>
+      </div>
+    </div>
+
+    <!-- Execution Logs & History Table -->
+    <div style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+        <div>
+          <h3 style="font-size: 1.05rem; font-weight: 700; color: #0f172a; margin: 0;">📋 Recent Scheduler Execution History</h3>
+          <p style="color: #64748b; font-size: 0.82rem; margin: 2px 0 0 0;">Last 30 automated scraping runs and ingest summaries</p>
+        </div>
+        <div style="font-size: 0.8rem; color: #64748b;">
+          Showing latest ${data.recent_runs ? data.recent_runs.length : 0} runs
+        </div>
+      </div>
+
+      <div style="overflow-x: auto;">
+        <table class="log-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left;">
+          <thead>
+            <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0; color: #475569;">
+              <th style="padding: 10px 12px;">Run ID</th>
+              <th style="padding: 10px 12px;">Feed / Source</th>
+              <th style="padding: 10px 12px;">Started At</th>
+              <th style="padding: 10px 12px;">Duration</th>
+              <th style="padding: 10px 12px;">Found</th>
+              <th style="padding: 10px 12px;">Added</th>
+              <th style="padding: 10px 12px;">Updated</th>
+              <th style="padding: 10px 12px;">Duplicates</th>
+              <th style="padding: 10px 12px;">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(data.recent_runs || []).map(r => {
+              const statusClass = r.Status === 'SUCCESS' ? 'status-success' : r.Status === 'RUNNING' ? 'status-running' : 'status-failed';
+              const statusIcon = r.Status === 'SUCCESS' ? '✓' : r.Status === 'RUNNING' ? '🔄' : '✕';
+              const durationText = r.DurationSeconds !== null && r.DurationSeconds !== undefined ? `${r.DurationSeconds}s` : (r.Status === 'RUNNING' ? 'In progress...' : '-');
+              const startedText = r.StartedAt ? new Date(r.StartedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', day: '2-digit', month: 'short' }) : '-';
+
+              return `
+                <tr style="border-bottom: 1px solid #f1f5f9;">
+                  <td style="padding: 10px 12px; font-weight: 600; color: #64748b;">#${r.ScrapeRunId}</td>
+                  <td style="padding: 10px 12px; font-weight: 600; color: #1e293b;">${escapeHtml(r.SourceName || 'All Feeds')}</td>
+                  <td style="padding: 10px 12px; color: #64748b;">${startedText}</td>
+                  <td style="padding: 10px 12px; color: #334155; font-family: monospace;">${durationText}</td>
+                  <td style="padding: 10px 12px; font-weight: 600; color: #0284c7;">${r.JobsFound || 0}</td>
+                  <td style="padding: 10px 12px; font-weight: 600; color: #059669;">+${r.JobsAdded || 0}</td>
+                  <td style="padding: 10px 12px; color: #475569;">${r.JobsUpdated || 0}</td>
+                  <td style="padding: 10px 12px; color: #7c3aed;">${r.DuplicatesFound || 0}</td>
+                  <td style="padding: 10px 12px;">
+                    <span class="badge-status ${statusClass}" title="${escapeHtml(r.ErrorMessage || r.Status)}">
+                      ${statusIcon} ${r.Status}
+                    </span>
+                  </td>
+                </tr>
+              `;
+            }).join('') || `
+              <tr>
+                <td colspan="9" style="text-align: center; padding: 32px; color: #94a3b8;">
+                  No scheduled runs recorded yet. Click <strong>"Run Ingestion Now"</strong> to trigger the first scrape.
+                </td>
+              </tr>
+            `}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  // Attach event handlers
+  document.getElementById('monitor-autorefresh-toggle')?.addEventListener('change', (e) => {
+    state.monitor.autoRefresh = e.target.checked;
+    setupMonitorAutoRefresh();
+    showToast(state.monitor.autoRefresh ? 'Auto-refresh enabled (10s)' : 'Auto-refresh paused', 'info');
+  });
+
+  document.getElementById('monitor-manual-refresh-btn')?.addEventListener('click', () => {
+    loadMonitorData();
+    showToast('Telemetry refreshed', 'info');
+  });
+
+  document.getElementById('monitor-trigger-sync-btn')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.innerText = '⚡ Triggering...';
+    showToast('Triggering background job refresh...', 'info');
+
+    try {
+      await api.triggerJobRefresh();
+      showToast('Scheduled scraper sync triggered successfully!', 'success');
+      setTimeout(() => loadMonitorData(), 1500);
+    } catch (err) {
+      showToast('Failed to trigger scraper: ' + err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerText = '⚡ Run Ingestion Now';
+    }
   });
 }
 
