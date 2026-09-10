@@ -1,12 +1,13 @@
 import logging
 import urllib.parse
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, MetaData
 from sqlalchemy.orm import sessionmaker, declarative_base
 from backend.app.database.config import settings
 
 logger = logging.getLogger(__name__)
 
-Base = declarative_base()
+metadata = MetaData(schema=settings.DB_SCHEMA)
+Base = declarative_base(metadata=metadata)
 
 def get_engine():
     try:

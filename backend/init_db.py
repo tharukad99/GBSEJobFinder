@@ -24,14 +24,33 @@ def hash_password(password: str) -> str:
     salt = "se_job_finder_salt_2026_"
     return hashlib.sha256((salt + password).encode()).hexdigest()
 
+from sqlalchemy import text
+
 def ensure_database_exists():
-    """Ensure that the MSSQL database exists, creating it if necessary."""
-    logger.info(f"Checking if database '{settings.DB_DATABASE}' exists on server '{settings.DB_SERVER}'...")
-    
+    """Ensure that the MSSQL database exists, creating it if necessary on local instances."""
+    logger.info(f"Checking database '{settings.DB_DATABASE}' on server '{settings.DB_SERVER}'...")
+    driver = settings.resolved_driver
     if settings.DB_USERNAME and settings.DB_PASSWORD:
-        conn_str = f"DRIVER={{{settings.DB_DRIVER}}};SERVER={settings.DB_SERVER};DATABASE=master;UID={settings.DB_USERNAME};PWD={settings.DB_PASSWORD};TrustServerCertificate={settings.DB_TRUST_SERVER_CERTIFICATE};"
+        conn_str = (
+            f"DRIVER={{{driver}}};"
+            f"SERVER={settings.DB_SERVER};"
+            f"DATABASE=master;"
+            f"UID={settings.DB_USERNAME};"
+            f"PWD={settings.DB_PASSWORD};"
+            f"Encrypt={settings.DB_ENCRYPT};"
+            f"TrustServerCertificate={settings.DB_TRUST_SERVER_CERTIFICATE};"
+            f"Connection Timeout={settings.DB_CONNECTION_TIMEOUT};"
+        )
     else:
-        conn_str = f"DRIVER={{{settings.DB_DRIVER}}};SERVER={settings.DB_SERVER};DATABASE=master;Trusted_Connection={settings.DB_TRUSTED_CONNECTION};TrustServerCertificate={settings.DB_TRUST_SERVER_CERTIFICATE};"
+        conn_str = (
+            f"DRIVER={{{driver}}};"
+            f"SERVER={settings.DB_SERVER};"
+            f"DATABASE=master;"
+            f"Trusted_Connection={settings.DB_TRUSTED_CONNECTION};"
+            f"Encrypt={settings.DB_ENCRYPT};"
+            f"TrustServerCertificate={settings.DB_TRUST_SERVER_CERTIFICATE};"
+            f"Connection Timeout={settings.DB_CONNECTION_TIMEOUT};"
+        )
 
     try:
         conn = pyodbc.connect(conn_str, autocommit=True)
@@ -43,11 +62,21 @@ def ensure_database_exists():
             cursor.execute(f"CREATE DATABASE [{settings.DB_DATABASE}]")
             logger.info(f"Database '{settings.DB_DATABASE}' created successfully.")
         else:
-            logger.info(f"Database '{settings.DB_DATABASE}' already exists.")
+            logger.info(f"Database '{settings.DB_DATABASE}' exists.")
         conn.close()
     except Exception as e:
-        logger.error(f"Error checking/creating database: {e}")
-        raise
+        logger.warning(f"Note on master database access (normal for Azure SQL / constrained users): {e}")
+
+def ensure_schema_exists():
+    """Ensure the target schema (e.g. 'job') exists in the database."""
+    logger.info(f"Ensuring database schema '{settings.DB_SCHEMA}' exists...")
+    with engine.connect() as conn:
+        conn.execute(text(
+            f"IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = '{settings.DB_SCHEMA}') "
+            f"EXEC('CREATE SCHEMA [{settings.DB_SCHEMA}]')"
+        ))
+        conn.commit()
+    logger.info(f"Database schema '{settings.DB_SCHEMA}' is ready.")
 
 def seed_skills(db):
     """Seed predefined primary and secondary skills."""
@@ -181,7 +210,8 @@ def seed_admin_user(db):
 
 def init_all():
     ensure_database_exists()
-    logger.info("Creating database tables...")
+    ensure_schema_exists()
+    logger.info(f"Creating database tables under schema '{settings.DB_SCHEMA}'...")
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables created.")
 

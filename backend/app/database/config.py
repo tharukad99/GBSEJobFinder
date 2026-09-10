@@ -13,9 +13,12 @@ class Settings(BaseSettings):
     DB_DATABASE: str = "SEJobFinderDB"
     DB_USERNAME: Optional[str] = None
     DB_PASSWORD: Optional[str] = None
-    DB_DRIVER: str = "ODBC Driver 17 for SQL Server"
-    DB_TRUSTED_CONNECTION: str = "yes"
-    DB_TRUST_SERVER_CERTIFICATE: str = "yes"
+    DB_DRIVER: str = "ODBC Driver 18 for SQL Server"
+    DB_TRUSTED_CONNECTION: str = "no"
+    DB_TRUST_SERVER_CERTIFICATE: str = "no"
+    DB_ENCRYPT: str = "yes"
+    DB_CONNECTION_TIMEOUT: int = 30
+    DB_SCHEMA: str = "job"
     SQL_ECHO: bool = False
 
     # Scheduler
@@ -33,12 +36,46 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str = "adminpassword123"
 
     @property
+    def resolved_driver(self) -> str:
+        try:
+            import pyodbc
+            available = pyodbc.drivers()
+            if self.DB_DRIVER in available:
+                return self.DB_DRIVER
+            if "ODBC Driver 18 for SQL Server" in available:
+                return "ODBC Driver 18 for SQL Server"
+            if "ODBC Driver 17 for SQL Server" in available:
+                return "ODBC Driver 17 for SQL Server"
+            if "SQL Server" in available:
+                return "SQL Server"
+        except Exception:
+            pass
+        return self.DB_DRIVER
+
+    @property
     def database_url(self) -> str:
-        # Build ODBC connection string
+        driver = self.resolved_driver
         if self.DB_USERNAME and self.DB_PASSWORD:
-            params = f"DRIVER={{{self.DB_DRIVER}}};SERVER={self.DB_SERVER};DATABASE={self.DB_DATABASE};UID={self.DB_USERNAME};PWD={self.DB_PASSWORD};TrustServerCertificate={self.DB_TRUST_SERVER_CERTIFICATE};"
+            params = (
+                f"DRIVER={{{driver}}};"
+                f"SERVER={self.DB_SERVER};"
+                f"DATABASE={self.DB_DATABASE};"
+                f"UID={self.DB_USERNAME};"
+                f"PWD={self.DB_PASSWORD};"
+                f"Encrypt={self.DB_ENCRYPT};"
+                f"TrustServerCertificate={self.DB_TRUST_SERVER_CERTIFICATE};"
+                f"Connection Timeout={self.DB_CONNECTION_TIMEOUT};"
+            )
         else:
-            params = f"DRIVER={{{self.DB_DRIVER}}};SERVER={self.DB_SERVER};DATABASE={self.DB_DATABASE};Trusted_Connection={self.DB_TRUSTED_CONNECTION};TrustServerCertificate={self.DB_TRUST_SERVER_CERTIFICATE};"
+            params = (
+                f"DRIVER={{{driver}}};"
+                f"SERVER={self.DB_SERVER};"
+                f"DATABASE={self.DB_DATABASE};"
+                f"Trusted_Connection={self.DB_TRUSTED_CONNECTION};"
+                f"Encrypt={self.DB_ENCRYPT};"
+                f"TrustServerCertificate={self.DB_TRUST_SERVER_CERTIFICATE};"
+                f"Connection Timeout={self.DB_CONNECTION_TIMEOUT};"
+            )
         
         quoted_params = urllib.parse.quote_plus(params)
         return f"mssql+pyodbc:///?odbc_connect={quoted_params}"

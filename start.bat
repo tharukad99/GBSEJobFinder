@@ -1,6 +1,6 @@
 @echo off
 echo Starting UK Software Engineering Job Finder (Unified Single App)...
-echo Database: TharukaDB on THARUKA\MSSQL
+echo Database: bsync (job schema) on Azure MSSQL Server
 echo.
 echo =======================================================
 echo Application UI:    http://127.0.0.1:8000
