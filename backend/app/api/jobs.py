@@ -9,7 +9,10 @@ from backend.app.models.job import Job
 from backend.app.models.company import Company
 from backend.app.models.sponsorship import SponsorshipEvidence
 from backend.app.models.skill import Skill, JobSkill
-from backend.app.schemas.job import JobListResponse, JobListItem, JobDetail, CompanySummary, SponsorshipEvidenceSchema, SkillItem
+from backend.app.schemas.job import (
+    JobListResponse, JobListItem, JobDetail, CompanySummary, 
+    SponsorshipEvidenceSchema, SkillItem, ToggleAppliedRequest, ToggleAppliedResponse
+)
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
@@ -44,6 +47,8 @@ def serialize_job(job: Job) -> dict:
         "SourceJobUrl": job.SourceJobUrl,
         "CompanyCareerUrl": job.CompanyCareerUrl,
         "ApplyUrl": job.ApplyUrl,
+        "IsApplied": bool(job.IsApplied),
+        "AppliedAt": job.AppliedAt,
         "PostedDate": job.PostedDate,
         "ClosingDate": job.ClosingDate,
         "FirstSeenAt": job.FirstSeenAt,
@@ -83,6 +88,7 @@ def get_jobs(
     experience_level: Optional[str] = Query(None, description="senior, mid, junior, all"),
     days: Optional[int] = Query(None, description="Posted in last N days (1, 3, 7, 14)"),
     work_type: Optional[str] = Query(None, description="Remote UK, Hybrid, On-site"),
+    applied_status: Optional[str] = Query(None, description="all, applied_only, not_applied"),
     status: Optional[str] = Query("ACTIVE", description="ACTIVE, POSSIBLY_REMOVED, CLOSED, ALL"),
     sort: Optional[str] = Query("best_match", description="best_match, newest, sponsorship, recently_verified"),
     page: int = Query(1, ge=1),
@@ -98,6 +104,14 @@ def get_jobs(
     # Status filter
     if status != "ALL":
         query = query.filter(Job.JobStatus == status)
+
+    # Applied status filter
+    if applied_status:
+        app_lower = applied_status.lower()
+        if app_lower in ("applied", "applied_only"):
+            query = query.filter(Job.IsApplied == True)
+        elif app_lower in ("not_applied", "unapplied"):
+            query = query.filter(Job.IsApplied == False)
 
     # Search keyword
     if q:
@@ -257,3 +271,34 @@ def get_job_by_id(job_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Job not found")
 
     return serialize_job(job)
+
+@router.post("/{job_id}/applied", response_model=ToggleAppliedResponse)
+@router.patch("/{job_id}/applied", response_model=ToggleAppliedResponse)
+def toggle_job_applied(
+    job_id: int,
+    payload: Optional[ToggleAppliedRequest] = None,
+    db: Session = Depends(get_db)
+):
+    job = db.query(Job).filter(Job.JobId == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if payload and payload.IsApplied is not None:
+        job.IsApplied = payload.IsApplied
+    else:
+        job.IsApplied = not bool(job.IsApplied)
+
+    if job.IsApplied:
+        job.AppliedAt = datetime.utcnow()
+    else:
+        job.AppliedAt = None
+
+    db.commit()
+    db.refresh(job)
+
+    return {
+        "JobId": job.JobId,
+        "IsApplied": bool(job.IsApplied),
+        "AppliedAt": job.AppliedAt,
+        "Message": f"Job marked as {'applied' if job.IsApplied else 'unapplied'} in database"
+    }

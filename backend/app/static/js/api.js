@@ -107,6 +107,13 @@ export const api = {
     return await request(`/jobs/recent?limit=${limit}`);
   },
 
+  async toggleJobApplied(jobId, isApplied = null) {
+    return await request(`/jobs/${jobId}/applied`, {
+      method: 'POST',
+      body: JSON.stringify(isApplied !== null ? { IsApplied: isApplied } : {}),
+    });
+  },
+
   // Companies
   async getCompanies(params = {}) {
     const query = new URLSearchParams();

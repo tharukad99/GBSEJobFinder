@@ -53,6 +53,8 @@ class JobListItem(BaseModel):
     SourceJobUrl: str
     CompanyCareerUrl: Optional[str] = None
     ApplyUrl: str
+    IsApplied: bool = False
+    AppliedAt: Optional[datetime] = None
     PostedDate: Optional[datetime] = None
     LastVerifiedAt: datetime
     JobStatus: str
@@ -81,3 +83,12 @@ class JobListResponse(BaseModel):
     page_size: int
     total_pages: int
     items: List[JobListItem]
+
+class ToggleAppliedRequest(BaseModel):
+    IsApplied: Optional[bool] = None
+
+class ToggleAppliedResponse(BaseModel):
+    JobId: int
+    IsApplied: bool
+    AppliedAt: Optional[datetime] = None
+    Message: str

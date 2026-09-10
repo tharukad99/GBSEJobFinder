@@ -74,3 +74,27 @@ def test_auth_login_invalid_credentials():
     )
     assert response.status_code == 401
 
+def test_toggle_applied_and_filter():
+    # Fetch a job first
+    jobs_resp = client.get("/api/jobs?page=1&page_size=1")
+    assert jobs_resp.status_code == 200
+    items = jobs_resp.json().get("items", [])
+    if items:
+        job_id = items[0]["JobId"]
+        
+        # Toggle applied to True
+        resp = client.post(f"/api/jobs/{job_id}/applied", json={"IsApplied": True})
+        assert resp.status_code == 200
+        assert resp.json()["IsApplied"] is True
+
+        # Check filter works
+        applied_resp = client.get("/api/jobs?applied_status=applied_only")
+        assert applied_resp.status_code == 200
+        applied_items = applied_resp.json().get("items", [])
+        assert any(j["JobId"] == job_id for j in applied_items)
+
+        # Toggle back to False
+        resp2 = client.post(f"/api/jobs/{job_id}/applied", json={"IsApplied": False})
+        assert resp2.status_code == 200
+        assert resp2.json()["IsApplied"] is False
+

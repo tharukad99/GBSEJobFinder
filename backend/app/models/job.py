@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, Float, DateTime, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, Text, Float, DateTime, Boolean, ForeignKey, Index
 from sqlalchemy.orm import relationship
 from backend.app.database.session import Base
 
@@ -35,6 +35,10 @@ class Job(Base):
     SourceJobUrl = Column(String(1000), nullable=False)
     CompanyCareerUrl = Column(String(1000), nullable=True)
     ApplyUrl = Column(String(1000), nullable=False)
+
+    # Application tracking
+    IsApplied = Column(Boolean, default=False, nullable=False, index=True)
+    AppliedAt = Column(DateTime, nullable=True)
 
     # Dates
     PostedDate = Column(DateTime, nullable=True, index=True)

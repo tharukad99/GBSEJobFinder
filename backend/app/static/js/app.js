@@ -1,60 +1,78 @@
 import { api } from './api.js';
 
-// LocalStorage helpers for tracking Applied Jobs
-const APPLIED_STORAGE_KEY = 'uk_se_applied_jobs_v1';
-
-function getAppliedJobs() {
-  try {
-    const raw = localStorage.getItem(APPLIED_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch (e) {
-    return {};
+function isJobApplied(job) {
+  if (!job) return false;
+  if (typeof job === 'object' && job.IsApplied !== undefined) {
+    return Boolean(job.IsApplied);
   }
+  const jobIdStr = String(typeof job === 'object' ? job.JobId : job);
+  const found = (state.jobs?.items || []).find(j => String(j.JobId) === jobIdStr) 
+    || (state.dashboard?.recentJobs || []).find(j => String(j.JobId) === jobIdStr)
+    || (state.selectedJob && String(state.selectedJob.JobId) === jobIdStr ? state.selectedJob : null);
+  return Boolean(found?.IsApplied);
 }
 
-function isJobApplied(jobId) {
-  if (!jobId) return false;
-  const applied = getAppliedJobs();
-  return Boolean(applied[String(jobId)]);
-}
-
-function getAppliedCount() {
-  return Object.keys(getAppliedJobs()).length;
-}
-
-function toggleJobApplied(job, event = null) {
+async function toggleJobApplied(job, event = null) {
   if (event) {
     event.stopPropagation();
   }
   if (!job || !job.JobId) return false;
 
-  const applied = getAppliedJobs();
-  const idStr = String(job.JobId);
-  let nowApplied = false;
+  const targetJobId = job.JobId;
+  const currentStatus = isJobApplied(job);
+  const newStatus = !currentStatus;
 
-  if (applied[idStr]) {
-    delete applied[idStr];
-    nowApplied = false;
-    showToast(`Removed "${job.Title}" from Applied tracker`, 'info');
-  } else {
-    applied[idStr] = {
-      jobId: job.JobId,
-      title: job.Title,
-      company: job.Company?.CompanyName || 'UK Employer',
-      appliedAt: new Date().toISOString()
-    };
-    nowApplied = true;
-    showToast(`Marked "${job.Title}" as Applied! ✓`, 'success');
-  }
+  // Immediate optimistic UI update
+  job.IsApplied = newStatus;
+  updateAppliedUI(targetJobId, newStatus);
 
   try {
-    localStorage.setItem(APPLIED_STORAGE_KEY, JSON.stringify(applied));
-  } catch (e) {
-    console.error('Failed to write applied jobs to localStorage', e);
-  }
+    const res = await api.toggleJobApplied(targetJobId, newStatus);
+    job.IsApplied = res.IsApplied;
+    job.AppliedAt = res.AppliedAt;
 
-  updateAppliedUI(job.JobId, nowApplied);
-  return nowApplied;
+    // Update in all local state arrays
+    if (state.jobs?.items) {
+      state.jobs.items.forEach(j => {
+        if (j.JobId === targetJobId) {
+          j.IsApplied = res.IsApplied;
+          j.AppliedAt = res.AppliedAt;
+        }
+      });
+    }
+    if (state.dashboard?.recentJobs) {
+      state.dashboard.recentJobs.forEach(j => {
+        if (j.JobId === targetJobId) {
+          j.IsApplied = res.IsApplied;
+          j.AppliedAt = res.AppliedAt;
+        }
+      });
+    }
+    if (state.selectedJob && state.selectedJob.JobId === targetJobId) {
+      state.selectedJob.IsApplied = res.IsApplied;
+      state.selectedJob.AppliedAt = res.AppliedAt;
+    }
+
+    if (res.IsApplied) {
+      showToast(`Marked "${job.Title}" as Applied in Database! ✓`, 'success');
+    } else {
+      showToast(`Unmarked "${job.Title}" from Applied status`, 'info');
+    }
+
+    updateAppliedUI(targetJobId, res.IsApplied);
+
+    // If filtering by applied status on jobs page, reload results from DB
+    if (state.currentRoute === 'jobs' && state.jobs.applied_status !== 'all') {
+      loadJobsData();
+    }
+    return res.IsApplied;
+  } catch (err) {
+    // Revert optimistic update on error
+    job.IsApplied = currentStatus;
+    updateAppliedUI(targetJobId, currentStatus);
+    showToast(`Failed to update application status: ${err.message}`, 'error');
+    return currentStatus;
+  }
 }
 
 function updateAppliedUI(jobId, isApplied) {
@@ -66,11 +84,11 @@ function updateAppliedUI(jobId, isApplied) {
       if (isApplied) {
         toggleBtn.classList.add('applied');
         toggleBtn.innerHTML = `<span>✓</span><span>Applied</span>`;
-        toggleBtn.title = 'Click to unmark as applied';
+        toggleBtn.title = 'Click to unmark as applied in database';
       } else {
         toggleBtn.classList.remove('applied');
         toggleBtn.innerHTML = `<span>✓</span><span>Mark Applied</span>`;
-        toggleBtn.title = 'Mark job as applied';
+        toggleBtn.title = 'Mark job as applied in database';
       }
     }
 
@@ -85,7 +103,7 @@ function updateAppliedUI(jobId, isApplied) {
     if (modalToggleBtn) {
       if (isApplied) {
         modalToggleBtn.classList.add('applied');
-        modalToggleBtn.innerHTML = `<span>✓</span><span>Applied on ${new Date().toLocaleDateString('en-GB')} (Click to Undo)</span>`;
+        modalToggleBtn.innerHTML = `<span>✓</span><span>Applied in DB (Click to Undo)</span>`;
       } else {
         modalToggleBtn.classList.remove('applied');
         modalToggleBtn.innerHTML = `<span>✓</span><span>Mark as Applied</span>`;
@@ -96,9 +114,11 @@ function updateAppliedUI(jobId, isApplied) {
     }
   }
 
+  // Update dashboard stat counter if on screen
   const appliedStatEl = document.getElementById('stat-applied-count-val');
   if (appliedStatEl) {
-    appliedStatEl.innerText = getAppliedCount();
+    const currentVal = parseInt(appliedStatEl.innerText, 10) || 0;
+    appliedStatEl.innerText = isApplied ? currentVal + 1 : Math.max(0, currentVal - 1);
   }
 }
 
@@ -521,7 +541,7 @@ function renderDashboardView() {
 
   const s = state.dashboard.stats;
   const recent = state.dashboard.recentJobs;
-  const appliedCount = getAppliedCount();
+  const appliedCount = s.applied_jobs || 0;
 
   container.innerHTML = `
     <!-- Hero Banner -->
@@ -733,6 +753,7 @@ async function loadJobsData() {
       location: state.jobs.location,
       skill: state.jobs.skill,
       experience_level: state.jobs.experience_level,
+      applied_status: state.jobs.applied_status !== 'all' ? state.jobs.applied_status : undefined,
       days: state.jobs.days,
       work_type: state.jobs.work_type,
       sort: state.jobs.sort,
@@ -741,18 +762,8 @@ async function loadJobsData() {
     };
 
     const data = await api.getJobs(filters);
-    let items = data.items || [];
-
-    if (state.jobs.applied_status === 'applied_only') {
-      const appliedMap = getAppliedJobs();
-      items = items.filter(j => Boolean(appliedMap[String(j.JobId)]));
-    } else if (state.jobs.applied_status === 'not_applied') {
-      const appliedMap = getAppliedJobs();
-      items = items.filter(j => !appliedMap[String(j.JobId)]);
-    }
-
-    state.jobs.items = items;
-    state.jobs.total = state.jobs.applied_status !== 'all' ? items.length : (data.total || 0);
+    state.jobs.items = data.items || [];
+    state.jobs.total = data.total || 0;
     state.jobs.totalPages = data.total_pages || 1;
 
     renderJobsResults();
@@ -929,7 +940,7 @@ function renderFilterPanel() {
       </label>
       <label class="filter-option">
         <input type="radio" name="filter-applied-status" value="applied_only" ${state.jobs.applied_status === 'applied_only' ? 'checked' : ''} />
-        <span style="color: #15803d; font-weight: 700;">✓ Applied Only (${getAppliedCount()})</span>
+        <span style="color: #15803d; font-weight: 700;">✓ Applied Roles Only</span>
       </label>
     </div>
 

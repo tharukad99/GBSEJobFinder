@@ -18,6 +18,7 @@ class DashboardStatsResponse(BaseModel):
     new_jobs_last_7_days: int
     confirmed_sponsorship_jobs: int
     may_offer_sponsorship_jobs: int
+    applied_jobs: int = 0
     london_jobs: int
     manchester_jobs: int
     remote_uk_jobs: int

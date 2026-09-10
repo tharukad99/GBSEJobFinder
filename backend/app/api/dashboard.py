@@ -23,6 +23,9 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     # Base active jobs
     total_active = db.query(Job).filter(Job.JobStatus == "ACTIVE").count()
 
+    # Applied jobs
+    applied_count = db.query(Job).filter(Job.JobStatus == "ACTIVE", Job.IsApplied == True).count()
+
     # New jobs
     new_today = db.query(Job).filter(Job.JobStatus == "ACTIVE", Job.FirstSeenAt >= today_start).count()
     new_7_days = db.query(Job).filter(Job.JobStatus == "ACTIVE", Job.FirstSeenAt >= seven_days_ago).count()
@@ -89,6 +92,7 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         new_jobs_last_7_days=new_7_days,
         confirmed_sponsorship_jobs=confirmed_count,
         may_offer_sponsorship_jobs=may_offer_count,
+        applied_jobs=applied_count,
         london_jobs=london_count,
         manchester_jobs=manchester_count,
         remote_uk_jobs=remote_uk_count,
