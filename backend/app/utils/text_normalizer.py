@@ -3,10 +3,10 @@ import html
 from typing import Optional
 
 LEGAL_SUFFIXES = [
-    r"\blimited\b", r"\bltd\b", r"\bplc\b", r"\bllc\b", r"\binc\b", r"\bcorp\b", 
+    r"\blimited\b", r"\bltd\b", r"\bplc\b", r"\bllc\b", r"\bllp\b", r"\blp\b", r"\binc\b", r"\bcorp\b", 
     r"\bcorporation\b", r"\buk\b", r"\bgroup\b", r"\btechnologies\b", 
     r"\btechnology\b", r"\bservices\b", r"\bsolutions\b", r"\bsoftware\b",
-    r"\bholdings\b", r"\bco\b", r"\bcompany\b", r"\binternational\b"
+    r"\bholdings\b", r"\bco\b", r"\bcompany\b", r"\binternational\b", r"\bglobal\b"
 ]
 
 def clean_html(raw_html: Optional[str]) -> str:
