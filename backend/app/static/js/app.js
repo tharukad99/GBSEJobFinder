@@ -1,5 +1,86 @@
 import { api } from './api.js';
 
+const DECLINED_JOBS_KEY = 'gb_declined_jobs';
+
+function getDeclinedJobIds() {
+  try {
+    const raw = sessionStorage.getItem(DECLINED_JOBS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function isJobDeclined(jobId) {
+  if (!jobId) return false;
+  const idStr = String(typeof jobId === 'object' && jobId !== null ? jobId.JobId : jobId);
+  return getDeclinedJobIds().some((id) => String(id) === idStr);
+}
+
+function declineJob(job, event = null) {
+  if (event) {
+    event.stopPropagation();
+  }
+  if (!job || !job.JobId) return;
+
+  const targetJobId = job.JobId;
+  const currentDeclined = getDeclinedJobIds();
+  if (!currentDeclined.some((id) => String(id) === String(targetJobId))) {
+    currentDeclined.push(targetJobId);
+    try {
+      sessionStorage.setItem(DECLINED_JOBS_KEY, JSON.stringify(currentDeclined));
+    } catch (e) {
+      console.warn('Could not save declined jobs to sessionStorage', e);
+    }
+  }
+
+  // Animate and remove cards with this job ID from DOM
+  const cards = document.querySelectorAll(`.job-card[data-job-id="${targetJobId}"]`);
+  cards.forEach((card) => {
+    card.classList.add('job-card-declining');
+    setTimeout(() => {
+      card.remove();
+
+      // If in jobs results and now empty
+      const resultsCol = document.getElementById('jobs-results-container');
+      if (resultsCol && resultsCol.querySelectorAll('.job-card').length === 0) {
+        resultsCol.innerHTML = `
+          <div class="empty-state">
+            <div style="font-size: 36px; margin-bottom: 12px;">🔍</div>
+            <h3>No jobs to display</h3>
+            <p>All matching jobs on this page have been declined or filtered out.</p>
+          </div>
+        `;
+      }
+      // If in dashboard recent jobs and now empty
+      const recentList = document.getElementById('dashboard-recent-jobs-list');
+      if (recentList && recentList.querySelectorAll('.job-card').length === 0) {
+        recentList.innerHTML = `
+          <div style="text-align: center; padding: 30px 20px; color: #64748b; grid-column: 1 / -1;">
+            <p>No recent jobs to display.</p>
+          </div>
+        `;
+      }
+    }, 320);
+  });
+
+  // Filter out of local state
+  if (state.jobs?.items) {
+    state.jobs.items = state.jobs.items.filter((j) => String(j.JobId) !== String(targetJobId));
+  }
+  if (state.dashboard?.recentJobs) {
+    state.dashboard.recentJobs = state.dashboard.recentJobs.filter((j) => String(j.JobId) !== String(targetJobId));
+  }
+
+  // If modal is currently open for this job, close it
+  if (state.selectedJob && String(state.selectedJob.JobId) === String(targetJobId)) {
+    closeJobModal();
+  }
+
+  const title = job.Title ? `"${job.Title}"` : 'Job';
+  showToast(`${title} declined and removed from list`, 'info');
+}
+
 function isJobApplied(job) {
   if (!job) return false;
   if (typeof job === 'object' && job.IsApplied !== undefined) {
@@ -544,7 +625,7 @@ async function loadDashboardData() {
       api.getRecentJobs(6),
     ]);
     state.dashboard.stats = stats;
-    state.dashboard.recentJobs = recentJobs;
+    state.dashboard.recentJobs = (recentJobs || []).filter((j) => !isJobDeclined(j.JobId));
     renderDashboardView();
   } catch (err) {
     container.innerHTML = `
@@ -744,6 +825,14 @@ function renderDashboardView() {
     });
   });
 
+  container.querySelectorAll('.job-card-decline-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const jobId = e.currentTarget.getAttribute('data-job-id');
+      const job = recent.find((j) => String(j.JobId) === String(jobId));
+      if (job) declineJob(job, e);
+    });
+  });
+
   container.querySelectorAll('.btn-applied-toggle').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       const jobId = e.currentTarget.getAttribute('data-job-id');
@@ -788,7 +877,7 @@ async function loadJobsData() {
     };
 
     const data = await api.getJobs(filters);
-    state.jobs.items = data.items || [];
+    state.jobs.items = (data.items || []).filter((j) => !isJobDeclined(j.JobId));
     state.jobs.total = data.total || 0;
     state.jobs.totalPages = data.total_pages || 1;
 
@@ -1215,6 +1304,14 @@ function renderJobsResults() {
         });
       });
 
+      resultsCol.querySelectorAll('.job-card-decline-btn').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          const jobId = e.currentTarget.getAttribute('data-job-id');
+          const job = state.jobs.items.find((j) => String(j.JobId) === String(jobId));
+          if (job) declineJob(job, e);
+        });
+      });
+
       resultsCol.querySelectorAll('.btn-applied-toggle').forEach((btn) => {
         btn.addEventListener('click', (e) => {
           const jobId = e.currentTarget.getAttribute('data-job-id');
@@ -1382,6 +1479,14 @@ function renderJobCardHtml(job) {
         </div>
 
         <div style="display: flex; align-items: center; gap: 8px;">
+          <button 
+            class="btn-decline job-card-decline-btn" 
+            data-job-id="${job.JobId}"
+            title="Decline this job (remove from list)"
+          >
+            <span>✕</span>
+            <span>Decline</span>
+          </button>
           <button class="btn-secondary job-card-select-btn" data-job-id="${job.JobId}">
             View Details
           </button>
@@ -3001,6 +3106,10 @@ function renderJobModal() {
           </div>
 
           <div style="display: flex; align-items: center; gap: 10px;">
+            <button id="job-modal-decline-btn" class="btn-decline" data-job-id="${job.JobId}" title="Decline this job (remove from list)">
+              <span>✕</span>
+              <span>Decline Job</span>
+            </button>
             <button id="job-modal-close-footer-btn" class="btn-secondary">
               Close
             </button>
@@ -3026,6 +3135,10 @@ function renderJobModal() {
 
   document.getElementById('job-modal-close-x-btn')?.addEventListener('click', closeJobModal);
   document.getElementById('job-modal-close-footer-btn')?.addEventListener('click', closeJobModal);
+
+  document.getElementById('job-modal-decline-btn')?.addEventListener('click', (e) => {
+    declineJob(job, e);
+  });
 
   document.getElementById('modal-applied-toggle-btn')?.addEventListener('click', () => {
     toggleJobApplied(job);
